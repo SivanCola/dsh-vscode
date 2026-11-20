@@ -1,6 +1,6 @@
-# DeepSeek Harness for VS Code
+# dsh-vscode
 
-通过 ACP v1 在 VS Code 侧栏使用已安装的 DeepSeek Harness。打开并信任项目文件夹，在活动栏点击 **DeepSeek Harness**，选择 **开始对话**。也可以在编辑器里选中文字，右键点击 **将选区加入 Harness 对话**。附件取自当前编辑器缓冲区，包含尚未保存的修改。确认附件和问题后点击 **发送**。
+通过 ACP v1 在 VS Code 侧栏使用已安装的 DeepSeek Harness。打开并信任项目文件夹，在活动栏点击 **dsh-vscode**，选择 **开始对话**。也可以在编辑器里选中文字，右键点击 **将选区加入 Harness 对话**。附件取自当前编辑器缓冲区，包含尚未保存的修改。确认附件和问题后点击 **发送**。
 
 ## 安装
 
@@ -11,7 +11,7 @@
 扩展在选择时读取最多 256 KiB 的 UTF-8 文本。ACP 连接支持图片输入时，PNG、JPEG、GIF 和 WebP 可随消息发送。每份草稿最多内嵌 8 MiB 的文件内容。PDF、其他二进制文件、超出内嵌额度的文件，以及连接不支持的图片，会标为 **本地文件引用**，Harness 可按路径读取。发送引用时需保留原文件。
 
 1. 安装 DeepSeek Harness，并为 `acp` profile 配置可用模型和凭据。
-2. 在扩展市场搜索 `SivanLiu.deepseek-harness-acp` 并安装。离线安装时，在 VS Code 命令面板运行 **从 VSIX 安装**，选择 `artifacts/deepseek-harness-acp-0.0.1.vsix`。
+2. 在 VS Code 命令面板运行 **从 VSIX 安装**，选择 `artifacts/dsh-vscode-0.0.1.vsix`。扩展的市场 ID 为 `SivanLiu.dsh-vscode`。
 3. 扩展从工作区宿主的 PATH 和 macOS 常见安装位置查找 `dsh`。找不到时，点击侧栏的 **选择 dsh 可执行文件**，或在用户设置填写 `deepseekHarness.executablePath` 的绝对路径。macOS 应用安装的常见路径为 `/usr/local/bin/dsh`。
 
 在 **Harness 设置 → 消息输入** 中，**按 Enter 发送消息** 默认开启，Shift+Enter 在光标处换行。关闭此项后，单按 Enter 也会换行。⌘Enter（Windows/Linux 为 Ctrl+Enter）仍可发送，Esc 可停止运行中的任务；这两个命令可以在 **配置快捷键** 中改绑。设置页也可选择 dsh、打开 ACP 配置和查看诊断。可执行文件在下次连接时生效。
@@ -42,4 +42,4 @@ Harness 请求工具权限时，侧栏提供 **允许一次** 和 **拒绝**。�
 
 将 `package.json`、`package-lock.json` 和 `CHANGELOG.md` 更新到同一版本并推送到 `main`，再创建并推送对应的 `vX.Y.Z` tag。Release 工作流会检出 tag、运行测试、打包并验证 VSIX，然后通过 Trusted Publishing 将同一份包发送到 VS Code Marketplace 和 Open VSX。两边上传成功后，工作流会创建附带 VSIX 的 GitHub Release。
 
-如需重试已有 tag，在 Actions 的 Release 工作流中选 `main`，在 `tag` 输入该 tag。两个市场的 Trusted Publishing 均绑定 `.github/workflows/release.yml` 和 `marketplaces` 环境。
+如需重试已有 tag，在 Actions 的 Release 工作流中选 `main`，在 `tag` 输入该 tag。Trusted Publishing 使用 `.github/workflows/release.yml` 和 `marketplaces` 环境。Open VSX 需要先上传新扩展 ID 的首个版本，再为该扩展注册 Trusted Publisher。

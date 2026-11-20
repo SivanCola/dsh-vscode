@@ -57,7 +57,7 @@ type PendingApproval = {
 }
 
 class HarnessView implements vscode.WebviewViewProvider {
-  readonly output = vscode.window.createOutputChannel('DeepSeek Harness')
+  readonly output = vscode.window.createOutputChannel('dsh-vscode')
   private readonly history?: History
   private view?: vscode.Webview
   private sidebar?: vscode.WebviewView
@@ -190,7 +190,7 @@ class HarnessView implements vscode.WebviewViewProvider {
       <html lang="${this.state.locale}"><head>
       <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${web.cspSource}; script-src 'nonce-${nonce}';">
-      <link rel="stylesheet" href="${asset('media/chat.css')}"><title>DeepSeek Harness</title>
+      <link rel="stylesheet" href="${asset('media/chat.css')}"><title>dsh-vscode</title>
       </head><body><header><div id="project"></div><div id="sessions"></div></header>
       <main id="chat" aria-label="${strings.session}"></main>
       <footer><div id="feedback" role="status"></div><div id="attachments"></div><div id="options"></div>

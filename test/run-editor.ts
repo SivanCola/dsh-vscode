@@ -11,7 +11,7 @@ import { chromium, type Browser, type Frame, type Page } from 'playwright-core'
 const run = promisify(execFile)
 const code = process.env.VSCODE_TEST_BINARY ?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code'
 const cli = process.env.VSCODE_TEST_CLI ?? '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'
-const { name, version } = JSON.parse(await readFile('package.json', 'utf8'))
+const { name, version, displayName } = JSON.parse(await readFile('package.json', 'utf8'))
 const artifact = resolve(`artifacts/${name}-${version}.vsix`)
 const real = process.env.DSH_UI_REAL === '1'
 const model = !real || process.env.DSH_TEST_MODEL === '1'
@@ -118,7 +118,7 @@ try {
   }, 'editor workbench')
   page.setDefaultTimeout(12_000)
   await page.bringToFront()
-  await page.locator('.activitybar [aria-label*="DeepSeek Harness"]').first().click()
+  await page.locator(`.activitybar [aria-label*="${displayName}"]`).first().click()
   let frame = await harnessFrame(page)
   const openSettings = async () => {
     await command(page, 'Harness Settings')

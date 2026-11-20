@@ -143,7 +143,7 @@ function render(current: ViewState) {
     chat.scrollTop = chat.scrollHeight
   }
   const project = get('project')
-  project.replaceChildren(el('strong', current.workspace ?? 'DeepSeek Harness'), el('span', s[current.connection], 'status'))
+  project.replaceChildren(el('strong', current.workspace ?? 'dsh-vscode'), el('span', s[current.connection], 'status'))
   const sessions = get('sessions')
   const selector = el('select')
   selector.setAttribute('aria-label', s.session)

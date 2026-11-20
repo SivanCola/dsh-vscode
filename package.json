@@ -1,12 +1,12 @@
 {
-  "name": "deepseek-harness-acp",
-  "displayName": "DeepSeek Harness ACP",
+  "name": "dsh-vscode",
+  "displayName": "dsh-vscode",
   "description": "Run DeepSeek Harness in VS Code through ACP v1.",
   "icon": "media/marketplace-icon.png",
   "version": "0.0.1",
   "publisher": "SivanLiu",
   "license": "Apache-2.0",
-  "repository": "https://github.com/SivanCola/deepseek-harness-acp",
+  "repository": "https://github.com/SivanCola/dsh-vscode",
   "private": true,
   "type": "module",
   "engines": {
@@ -36,7 +36,7 @@
       "activitybar": [
         {
           "id": "deepseekHarness",
-          "title": "DeepSeek Harness",
+          "title": "dsh-vscode",
           "icon": "media/icon.svg"
         }
       ]
@@ -54,7 +54,7 @@
       {
         "command": "deepseekHarness.openChat",
         "title": "%command.open%",
-        "category": "DeepSeek Harness"
+        "category": "dsh-vscode"
       },
       {
         "command": "deepseekHarness.addSelection",
@@ -63,30 +63,30 @@
       {
         "command": "deepseekHarness.showOutput",
         "title": "%command.output%",
-        "category": "DeepSeek Harness"
+        "category": "dsh-vscode"
       },
       {
         "command": "deepseekHarness.settings",
         "title": "%command.settings%",
-        "category": "DeepSeek Harness",
+        "category": "dsh-vscode",
         "icon": "$(gear)"
       },
       {
         "command": "deepseekHarness.send",
         "title": "%command.send%",
-        "category": "DeepSeek Harness",
+        "category": "dsh-vscode",
         "enablement": "deepseekHarness.chatVisible"
       },
       {
         "command": "deepseekHarness.stop",
         "title": "%command.stop%",
-        "category": "DeepSeek Harness",
+        "category": "dsh-vscode",
         "enablement": "deepseekHarness.running"
       },
       {
         "command": "deepseekHarness.askSelection",
         "title": "%command.askSelection%",
-        "category": "DeepSeek Harness"
+        "category": "dsh-vscode"
       }
     ],
     "menus": {
@@ -111,7 +111,7 @@
       ]
     },
     "configuration": {
-      "title": "DeepSeek Harness",
+      "title": "dsh-vscode",
       "properties": {
         "deepseekHarness.enterToSend": {
           "type": "boolean",

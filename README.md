@@ -1,6 +1,6 @@
-# DeepSeek Harness for VS Code
+# dsh-vscode
 
-Run an installed DeepSeek Harness from a dedicated VS Code chat view using ACP v1. Open a trusted project folder and select **DeepSeek Harness** in the Activity Bar. Use **Start a conversation**, or right-click selected editor text and choose **Add Selection to Harness Chat**. The attachment captures the current buffer, including edits you have yet to save. Review it and press **Send**.
+Run an installed DeepSeek Harness from a dedicated VS Code chat view using ACP v1. Open a trusted project folder and select **dsh-vscode** in the Activity Bar. Use **Start a conversation**, or right-click selected editor text and choose **Add Selection to Harness Chat**. The attachment captures the current buffer, including edits you have yet to save. Review it and press **Send**.
 
 ## Install
 
@@ -20,7 +20,7 @@ The gear opens a settings page inside the sidebar. Choose the default provider a
 
 Under **Harness Settings → Message input**, **Send with Enter** is enabled by default. Shift+Enter inserts a new line. Turn the option off to use Enter for new lines too. Cmd+Enter (Ctrl+Enter on Windows/Linux) is the existing configurable send command; Escape stops a running task. The settings page also provides runtime selection, the ACP profile and diagnostics. A path change applies on the next connection.
 
-Install DeepSeek Harness and configure a working model in its `acp` profile. Search for `SivanLiu.deepseek-harness-acp` in your extension marketplace. For offline installation, run **Extensions: Install from VSIX…** and select the packaged artifact. The extension discovers `dsh` on the workspace host's PATH and checks the common macOS install locations. Set `deepseekHarness.executablePath` to an absolute executable path if discovery fails.
+Install DeepSeek Harness and configure a working model in its `acp` profile. To install dsh-vscode from a package, run **Extensions: Install from VSIX…** and select the VSIX. The marketplace ID is `SivanLiu.dsh-vscode`. The extension discovers `dsh` on the workspace host's PATH and checks the common macOS install locations. Set `deepseekHarness.executablePath` to an absolute executable path if discovery fails.
 
 Tool cards display the information sent by Harness. When its permission policy requests a decision, choose **Allow once** or **Reject**. Review changed files in VS Code Source Control. The conversation selector lists resumable Harness sessions for the chosen folder. VS Code keeps its own displayed message history in workspace storage. Use **Clear local chat history** to remove this copy. Harness retains its own session.
 
