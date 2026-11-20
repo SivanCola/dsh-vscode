@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release-tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ inputs.release-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release-tag && format('refs/tags/{0}', inputs.release-tag) || github.ref }}
+          fetch-depth: ${{ inputs.release-tag && '0' || '1' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate release tag
+        if: inputs.release-tag != ''
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$RELEASE_TAG" != "v$version" ]]; then
+            echo "::error::Expected a stable release tag matching package.json, got $RELEASE_TAG for version $version."
+            exit 1
+          fi
+          git merge-base --is-ancestor HEAD origin/main
+      - run: npm ci
+      - run: npm test
+      - run: npm run package
+      - name: Verify packaged contents
+        run: node scripts/verify-vsix.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: artifacts/*.vsix
+          if-no-files-found: error

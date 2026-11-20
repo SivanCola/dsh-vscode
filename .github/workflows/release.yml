@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.0.2
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    with:
+      release-tag: ${{ inputs.tag || github.ref_name }}
+    permissions:
+      contents: read
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: marketplaces
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: artifacts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish to VS Code Marketplace
+        run: npm exec --yes --package=@vscode/vsce@4.1.1 -- vsce publish --oidc --skip-duplicate --packagePath artifacts/*.vsix
+      - name: Publish to Open VSX
+        run: npm exec --yes --package=ovsx@1.4.0 -- ovsx publish --trusted-publishing --skip-duplicate artifacts/*.vsix
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: artifacts
+      - name: Create GitHub Release
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/*.vsix --clobber
+          else
+            gh release create "$RELEASE_TAG" artifacts/*.vsix --verify-tag --generate-notes
+          fi

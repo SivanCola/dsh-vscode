@@ -1,0 +1,13 @@
+{
+  "view.chat": "Chat",
+  "configuration.enterToSend": "Send with Enter in the message box. Shift+Enter inserts a new line.",
+  "configuration.language": "Interface language for Harness chat and settings. Auto follows VS Code.",
+  "command.open": "Open Chat",
+  "command.settings": "Harness Settings",
+  "command.send": "Send Message",
+  "command.stop": "Stop Task",
+  "command.selection": "Add Selection to Harness Chat",
+  "command.askSelection": "Ask About Selection in Harness Chat",
+  "command.output": "Show Diagnostics",
+  "configuration.executable": "Absolute path to dsh on the workspace host. Leave empty to discover the installed executable."
+}

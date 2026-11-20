@@ -1,0 +1,95 @@
+* { box-sizing: border-box; }
+:root { color-scheme: light dark; }
+body {
+  height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  margin: 0; padding: 0; background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground); font: var(--vscode-font-size) var(--vscode-font-family);
+}
+header, footer { padding: 10px 12px; }
+header { border-bottom: 1px solid var(--vscode-panel-border); }
+footer { border-top: 1px solid var(--vscode-panel-border); }
+#project { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; overflow-wrap: anywhere; padding-bottom: 8px; }
+.status, .notice, .author { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+#sessions, #feedback, #options, #attachments, .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#sessions select { width: 100%; }
+#feedback > div:empty { display: none; }
+#feedback:not(:empty), #options:not(:empty), #attachments:not(:empty) { margin-bottom: 6px; }
+#options label { display: flex; flex-direction: column; min-width: 0; gap: 3px; flex: 1 1 90px; }
+#chat { overflow: auto; padding: 10px 12px; overflow-wrap: anywhere; }
+textarea, select, button { font: inherit; border-radius: 4px; }
+textarea, select {
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 5px 7px;
+}
+textarea { width: 100%; resize: vertical; min-height: 46px; max-height: 32vh; }
+button {
+  padding: 4px 8px; border: 1px solid transparent; cursor: pointer;
+  color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground);
+}
+button:hover:enabled { background: var(--vscode-button-secondaryHoverBackground); }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover:enabled { background: var(--vscode-button-hoverBackground); }
+button:disabled, select:disabled { opacity: .5; cursor: default; }
+:is(button, select, textarea, summary):focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+#actions { display: flex; justify-content: end; margin-top: 5px; }
+.attach-files { margin-inline-end: auto; }
+#attachments { max-height: 18vh; overflow: auto; }
+.chip .file-name { min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.chip small { color: var(--vscode-descriptionForeground); }
+.composer { position: relative; }
+#slashMenu {
+  position: absolute; bottom: 100%; inset-inline: 0; z-index: 2; overflow-y: auto;
+  max-height: min(38vh, 18rem); padding: 3px; border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border));
+}
+#slashMenu [role=option] { padding: 4px 6px; cursor: pointer; overflow-wrap: anywhere; }
+#slashMenu [aria-selected=true] {
+  background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground);
+}
+#slashHint { color: var(--vscode-descriptionForeground); }
+.entry { margin: 0 0 11px; }
+.entry.user, .tool, .approval, .thought {
+  border: 1px solid var(--vscode-panel-border); border-radius: 6px; padding: 8px;
+}
+.entry.user { background: var(--vscode-editor-background); }
+.entry.user .message { white-space: pre-wrap; }
+.author { margin-bottom: 4px; font-weight: 600; }
+.message > :first-child { margin-top: 0; }
+.message > :last-child { margin-bottom: 0; }
+.message { line-height: 1.5; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 6px; background: var(--vscode-textCodeBlock-background); border-radius: 4px; }
+code, pre { font-family: var(--vscode-editor-font-family, monospace); }
+summary { cursor: pointer; }
+.approval { margin-top: 6px; border-color: var(--vscode-editorWarning-foreground); }
+.approval .row, .toolBody { margin-top: 6px; }
+.error { color: var(--vscode-errorForeground); width: 100%; }
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { padding: 1px 5px; }
+.selection-toolbar {
+  position: fixed; z-index: 5; display: flex; max-width: calc(100vw - 8px);
+  padding: 3px; gap: 3px; border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 5px; background: var(--vscode-editorWidget-background);
+  box-shadow: 0 2px 7px var(--vscode-widget-shadow);
+}
+.selection-toolbar button { font-size: .92em; }
+[hidden] { display: none !important; }
+body.show-settings { display: block; }
+.show-settings > :is(header, main, footer) { display: none; }
+#settingsPage { height: 100%; overflow: auto; padding: 12px clamp(12px, 5vw, 24px) 20px; }
+#settingsPage h1 { font-size: 1.45em; font-weight: 600; margin: 14px 0 4px; }
+#settingsPage h2 { font-size: 1em; font-weight: 600; margin: 0 0 10px; }
+#settingsPage section { padding: 16px 0; border-bottom: 1px solid var(--vscode-panel-border); }
+#settingsPage label { display: block; color: var(--vscode-descriptionForeground); margin: 8px 0 4px; }
+#settingsPage .inputToggle { display: flex; align-items: center; gap: 6px; color: var(--vscode-foreground); }
+.inputToggle input { margin: 0; accent-color: var(--vscode-focusBorder); }
+.newlineHint { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 9px 0; }
+kbd { font-family: inherit; color: var(--vscode-keybindingLabel-foreground); background: var(--vscode-keybindingLabel-background); border: 1px solid var(--vscode-keybindingLabel-border); border-radius: 3px; padding: 1px 4px; }
+#settingsPage select { width: 100%; min-height: 28px; }
+#saveDefault { margin-top: 10px; }
+#runtimePath { display: block; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); margin-bottom: 10px; }
+#settingsPage :is(.back,.settingsLinks button) { color: var(--vscode-textLink-foreground); background: transparent; padding: 3px 0; text-align: start; }
+.settingsLinks { display: grid; justify-items: start; gap: 5px; }
+#settingsPage :is(.back,.settingsLinks button):hover { text-decoration: underline; }
+#settingsPage p { font-size: .95em; color: var(--vscode-descriptionForeground); }

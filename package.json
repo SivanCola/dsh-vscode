@@ -1,0 +1,176 @@
+{
+  "name": "deepseek-harness-acp",
+  "displayName": "DeepSeek Harness ACP",
+  "description": "Run DeepSeek Harness in VS Code through ACP v1.",
+  "icon": "media/marketplace-icon.png",
+  "version": "0.0.1",
+  "publisher": "SivanLiu",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/SivanCola/deepseek-harness-acp",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.cjs",
+  "categories": [
+    "AI"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "onView:deepseekHarness.chat",
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepseekHarness",
+          "title": "DeepSeek Harness",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "deepseekHarness": [
+        {
+          "type": "webview",
+          "id": "deepseekHarness.chat",
+          "name": "%view.chat%"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "deepseekHarness.openChat",
+        "title": "%command.open%",
+        "category": "DeepSeek Harness"
+      },
+      {
+        "command": "deepseekHarness.addSelection",
+        "title": "%command.selection%"
+      },
+      {
+        "command": "deepseekHarness.showOutput",
+        "title": "%command.output%",
+        "category": "DeepSeek Harness"
+      },
+      {
+        "command": "deepseekHarness.settings",
+        "title": "%command.settings%",
+        "category": "DeepSeek Harness",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "deepseekHarness.send",
+        "title": "%command.send%",
+        "category": "DeepSeek Harness",
+        "enablement": "deepseekHarness.chatVisible"
+      },
+      {
+        "command": "deepseekHarness.stop",
+        "title": "%command.stop%",
+        "category": "DeepSeek Harness",
+        "enablement": "deepseekHarness.running"
+      },
+      {
+        "command": "deepseekHarness.askSelection",
+        "title": "%command.askSelection%",
+        "category": "DeepSeek Harness"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "deepseekHarness.addSelection",
+          "when": "editorHasSelection && isWorkspaceTrusted",
+          "group": "navigation@90"
+        },
+        {
+          "command": "deepseekHarness.askSelection",
+          "when": "editorHasSelection && isWorkspaceTrusted",
+          "group": "navigation@91"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "deepseekHarness.settings",
+          "when": "view == deepseekHarness.chat",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DeepSeek Harness",
+      "properties": {
+        "deepseekHarness.enterToSend": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "%configuration.enterToSend%"
+        },
+        "deepseekHarness.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "zh-CN",
+            "en"
+          ],
+          "default": "auto",
+          "scope": "application",
+          "description": "%configuration.language%"
+        },
+        "deepseekHarness.executablePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%configuration.executable%"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "deepseekHarness.send",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "deepseekHarness.chatFocused"
+      },
+      {
+        "command": "deepseekHarness.stop",
+        "key": "escape",
+        "when": "deepseekHarness.chatFocused && deepseekHarness.running"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run typecheck && node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:ui": "npm run build && tsx test/run-editor.ts",
+    "package": "npm run build && node -e \"require('node:fs').mkdirSync('artifacts', {recursive:true})\" && vsce package --no-dependencies --allow-missing-repository --out artifacts/"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.10.2",
+    "@types/vscode": "1.92.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.28.0",
+    "playwright-core": "^1.57.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

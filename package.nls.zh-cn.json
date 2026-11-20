@@ -1,0 +1,13 @@
+{
+  "view.chat": "对话",
+  "configuration.enterToSend": "在消息输入框内按 Enter 发送。Shift+Enter 换行。",
+  "configuration.language": "Harness 对话和设置页的界面语言。auto 表示跟随 VS Code。",
+  "command.open": "打开对话",
+  "command.settings": "Harness 设置",
+  "command.send": "发送消息",
+  "command.stop": "停止任务",
+  "command.selection": "将选区加入 Harness 对话",
+  "command.askSelection": "在 Harness 侧边聊天中提问",
+  "command.output": "显示诊断",
+  "configuration.executable": "工作区宿主上的 dsh 绝对路径。留空时自动查找已安装的可执行文件。"
+}
