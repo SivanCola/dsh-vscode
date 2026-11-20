@@ -43,3 +43,5 @@ Harness 请求工具权限时，侧栏提供 **允许一次** 和 **拒绝**。�
 将 `package.json`、`package-lock.json` 和 `CHANGELOG.md` 更新到同一版本并推送到 `main`，再创建并推送对应的 `vX.Y.Z` tag。Release 工作流会检出 tag、运行测试、打包并验证 VSIX，然后通过 Trusted Publishing 将同一份包发送到 VS Code Marketplace 和 Open VSX。两边上传成功后，工作流会创建附带 VSIX 的 GitHub Release。
 
 如需重试已有 tag，在 Actions 的 Release 工作流中选 `main`，在 `tag` 输入该 tag。Trusted Publishing 使用 `.github/workflows/release.yml` 和 `marketplaces` 环境。Open VSX 需要先上传新扩展 ID 的首个版本，再为该扩展注册 Trusted Publisher。
+
+只检查微软市场授权时，在 Actions 手动运行 Release 并勾选 `verify-vscode`。这个检查只交换短期凭据。

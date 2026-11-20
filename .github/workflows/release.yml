@@ -8,7 +8,10 @@ on:
       tag:
         description: Existing release tag, for example v0.0.2
         type: string
-        required: true
+      verify-vscode:
+        description: Check VS Code Marketplace authorization without publishing
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -18,10 +21,10 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' || (github.ref == 'refs/heads/main' && !inputs.verify-vscode)
     uses: ./.github/workflows/ci.yml
     with:
-      release-tag: ${{ inputs.tag || github.ref_name }}
+      release-tag: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'missing-tag' }}
     permissions:
       contents: read
 
@@ -44,6 +47,29 @@ jobs:
         run: npm exec --yes --package=@vscode/vsce@4.1.1 -- vsce publish --oidc --skip-duplicate --packagePath artifacts/*.vsix
       - name: Publish to Open VSX
         run: npm exec --yes --package=ovsx@1.4.0 -- ovsx publish --trusted-publishing --skip-duplicate artifacts/*.vsix
+
+  verify-vscode:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.verify-vscode
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: marketplaces
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Exchange a Marketplace credential
+        run: |
+          npm install --prefix "$RUNNER_TEMP/vsce-check" --ignore-scripts --no-audit --no-fund @vscode/vsce@4.1.1
+          node --input-type=commonjs <<'NODE'
+          const { join } = require('node:path')
+          const { getOIDCCredential } = require(join(process.env.RUNNER_TEMP, 'vsce-check/node_modules/@vscode/vsce/out/oidc.js'))
+          getOIDCCredential('SivanLiu').then(
+            () => console.log('VS Code Marketplace accepted the workflow identity.'),
+            error => { console.error(error.message); process.exitCode = 1 }
+          )
+          NODE
 
   github-release:
     needs: publish
