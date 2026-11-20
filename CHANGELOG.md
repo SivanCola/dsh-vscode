@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.3
+
+- Keep chat selections, scroll position, and approval and stop buttons stable during streamed replies. Batch local history writes.
+- Recover from unavailable conversations and failed session closes. Close the ACP connection if a turn fails to stop within 10 seconds.
+- Restore the workspace conversation when the sidebar is first opened from an editor selection. Keep different conversations' quotes and tool panels independent.
+- Handle removed default models, failed sends and clipboard pastes, and attachment limits on text-only connections. Expire old clipboard file links after 30 days.
+
 ## 0.0.2
 
 - Use dsh-vscode-mini as the display name in VS Code Marketplace and Open VSX.

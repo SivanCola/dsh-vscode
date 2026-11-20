@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { access, realpath, stat } from 'node:fs/promises'
-import { constants } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { constants, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   client as createAcpClientApp, methods, ndJsonStream, PROTOCOL_VERSION,
@@ -14,6 +15,16 @@ export class ConnectionError extends Error {
   constructor(readonly kind: 'executable' | 'spawn' | 'protocol' | 'exit' | 'timeout', message: string) {
     super(message)
   }
+}
+
+export function dshHome(cwd: string, value = process.env.DSH_HOME ?? '') {
+  const trimmed = value.trim()
+  if (!trimmed) return join(homedir(), '.dsh')
+  const shorthand = /^~(?=$|[\\/])/
+  const expand = (path: string) => shorthand.test(path) ? join(homedir(), path.slice(2)) : resolve(cwd, path)
+  const original = expand(value)
+  // Preserve an existing path with literal spaces, but accept a padded home shorthand.
+  return value !== trimmed && shorthand.test(trimmed) && !existsSync(original) ? expand(trimmed) : original
 }
 
 export async function findExecutable(configured: string): Promise<string> {
@@ -42,12 +53,14 @@ export function startAcp(
   },
   { args = ['--profile', 'acp'], env = process.env } = {},
 ) {
-  const child = spawn(command, args, { cwd, env, stdio: 'pipe', windowsHide: true })
+  const child = spawn(command, args, { cwd, env: { ...env, DSH_HOME: dshHome(cwd, env.DSH_HOME ?? '') }, stdio: 'pipe', windowsHide: true })
   child.stderr.resume()
   // Protocol disconnect handles pending RPCs. Pipe failures can also emit Node errors.
   child.stdin.on('error', () => {})
   child.stdout.on('error', () => {})
   let disposed = false
+  let stopping: Promise<void> | undefined
+  const shutdown = () => stopping ??= stopProcess(child)
   const app = createAcpClientApp({ name: clientName })
     .onNotification(methods.client.session.update, ({ params }) => {
       if (!disposed) callbacks.update(params)
@@ -62,7 +75,7 @@ export function startAcp(
   const disconnected = (error: ConnectionError) => {
     if (!disposed) {
       disposed = true
-      void stopProcess(child)
+      void shutdown()
       callbacks.disconnected(error)
     }
   }
@@ -72,20 +85,25 @@ export function startAcp(
     disconnected(new ConnectionError('exit', 'ACP connection closed'))
   }, () => disconnected(new ConnectionError('protocol', 'ACP transport failed')))
 
+  function abort(error: ConnectionError) {
+    disconnected(error)
+    connection.close(error)
+  }
+
   async function bounded<T>(operation: Promise<T>, ms = 20_000): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         const error = new ConnectionError('timeout', 'ACP request timed out')
         reject(error)
-        disconnected(error)
-        connection.close(error)
+        abort(error)
       }, ms)
     })
     try { return await Promise.race([operation, timeout]) } finally { clearTimeout(timer) }
   }
 
   return {
+    abort,
     async initialize() {
       const response = await bounded(agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION, clientCapabilities: {},
@@ -118,7 +136,8 @@ export function startAcp(
     },
     async dispose() {
       disposed = true
-      await stopProcess(child)
+      connection.close(new ConnectionError('exit', 'ACP connection closed'))
+      await shutdown()
     },
   }
 }

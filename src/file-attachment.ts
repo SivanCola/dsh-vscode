@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, open, rm, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, rm, stat, utimes } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 
 const textLimit = 256 * 1024
 export const draftFileBudget = 8 * 1024 * 1024
+const clipboardRetentionMs = 30 * 24 * 60 * 60 * 1000
 type Payload = { type: 'text'; text: string } | { type: 'image'; mimeType: string; data: string }
 export type FileAttachment = {
   kind: 'file'; id: string; path: string; name: string; size: number; payload?: Payload; clipboard?: boolean
@@ -79,16 +80,38 @@ export async function discardClipboardImage(file: FileAttachment) {
   if (file.clipboard) await rm(file.path, { force: true })
 }
 
-export function fileMode(file: FileAttachment, images?: boolean) {
+export async function pruneClipboardImages(directory: string) {
+  const cutoff = Date.now() - clipboardRetentionMs
+  const names = await readdir(directory).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  })
+  for (const name of names) {
+    if (!/^clipboard-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.(png|jpeg|gif|webp)$/.test(name)) continue
+    const path = join(directory, name)
+    const info = await lstat(path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    })
+    if (info?.isFile() && info.mtimeMs < cutoff) await rm(path, { force: true })
+  }
+}
+
+export function fileMode(file: FileAttachment, images?: boolean, remaining = draftFileBudget) {
+  if (file.size > remaining) return 'fileLink'
   if (file.payload?.type === 'text') return 'fileText'
   if (file.payload?.type === 'image' && images !== false) return images ? 'fileImage' : 'filePendingImage'
   return 'fileLink'
 }
 
-export async function fileBlock(file: FileAttachment, images: boolean): Promise<ContentBlock> {
-  if (file.payload?.type === 'text') return { type: 'text', text: `Attached file ${JSON.stringify(file.name)}:\n${file.payload.text}\n\n` }
-  if (images && file.payload?.type === 'image') return file.payload
+export async function fileBlock(file: FileAttachment, images: boolean, inline = true): Promise<ContentBlock> {
+  if (inline && file.payload?.type === 'text') return { type: 'text', text: `Attached file ${JSON.stringify(file.name)}:\n${file.payload.text}\n\n` }
+  if (inline && images && file.payload?.type === 'image') return file.payload
   const info = await stat(file.path)
   if (!info.isFile()) throw new Error('Expected a regular file')
+  if (file.clipboard) {
+    const now = new Date()
+    await utimes(file.path, info.atime, now).catch(() => {})
+  }
   return { type: 'resource_link', name: file.name, uri: pathToFileURL(file.path).href, size: info.size }
 }

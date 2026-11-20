@@ -4,7 +4,7 @@ Run an installed DeepSeek Harness from a dedicated VS Code chat view using ACP v
 
 ## Install
 
-Paste a copied image or screenshot into the message input with Cmd+V (Ctrl+V on Windows/Linux). A paste can contain up to 32 images totaling 8 MiB. Clipboard images sent as local file links stay in extension storage for the conversation.
+Paste a copied image or screenshot into the message input with Cmd+V (Ctrl+V on Windows/Linux). A paste can contain up to 32 images totaling 8 MiB. Clipboard images sent as local file links stay in extension storage for 30 days from when they were last attached. The extension removes expired images at startup.
 
 Use **Attach files** below the message input to select one or more files. Each attachment shows its size and delivery mode. Click its name to open the source file, or × to remove it. Send files on their own or with a message.
 
@@ -22,7 +22,7 @@ Under **Harness Settings → Message input**, **Send with Enter** is enabled by 
 
 Install DeepSeek Harness and configure a working model in its `acp` profile. Search for **dsh-vscode-mini** using the extension ID `SivanLiu.dsh-vscode-sivan`. To install from a package, run **Extensions: Install from VSIX…** and select the VSIX. The extension discovers `dsh` on the workspace host's PATH and checks the common macOS install locations. Set `deepseekHarness.executablePath` to an absolute executable path if discovery fails.
 
-Tool cards display the information sent by Harness. When its permission policy requests a decision, choose **Allow once** or **Reject**. Review changed files in VS Code Source Control. The conversation selector lists resumable Harness sessions for the chosen folder. VS Code keeps its own displayed message history in workspace storage. Use **Clear local chat history** to remove this copy. Harness retains its own session.
+Tool cards display the information sent by Harness. When its permission policy requests a decision, choose **Allow once** or **Reject**. If Harness does not finish cancelling within 10 seconds, the extension closes the connection and shows **Reconnect**. Review changed files in VS Code Source Control. The conversation selector lists resumable Harness sessions for the chosen folder. VS Code keeps its own displayed message history in workspace storage. Use **Clear local chat history** to remove this copy. Harness retains its own session.
 
 VS Code desktop and a trusted filesystem workspace are required. The verified runtime versions are listed in the acceptance record.
 

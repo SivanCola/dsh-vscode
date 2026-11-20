@@ -6,13 +6,13 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { chromium, type Browser, type Frame, type Page } from 'playwright-core'
+import { chromium, type Browser, type Frame, type Locator, type Page } from 'playwright-core'
 
 const run = promisify(execFile)
 const code = process.env.VSCODE_TEST_BINARY ?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code'
 const cli = process.env.VSCODE_TEST_CLI ?? '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code'
 const { name, version, contributes } = JSON.parse(await readFile('package.json', 'utf8'))
-const artifact = resolve(`artifacts/${name}-${version}.vsix`)
+const artifact = resolve(process.env.VSCODE_TEST_VSIX ?? `artifacts/${name}-${version}.vsix`)
 const real = process.env.DSH_UI_REAL === '1'
 const model = !real || process.env.DSH_TEST_MODEL === '1'
 const approvals = real && model && process.env.DSH_TEST_APPROVAL === '1'
@@ -382,19 +382,42 @@ try {
     await page.locator('.tab.active').getByText('cordis.patch.yml', { exact: true }).waitFor()
     await page.keyboard.press('Meta+w')
     console.log('Installed settings gear, dsh picker, configuration, diagnostics, shortcut editor and rebound send verified')
+    async function clickAcrossChunk(button: Locator, thought: Locator) {
+      await thought.waitFor({ state: 'attached' })
+      await button.scrollIntoViewIfNeeded()
+      const box = await button.boundingBox()
+      assert.ok(box)
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      await page.mouse.down()
+      const text = await thought.textContent()
+      await retry(async () => (await thought.textContent()) !== text ? true : undefined, 'stream update while button is pressed')
+      await page.mouse.up()
+    }
+    const thoughts = frame.locator('.entry.thought .message')
     for (const [choice, result] of [['Allow once', 'allow-once'], ['Reject', 'reject-once']]) {
+      const nextThought = thoughts.nth(await thoughts.count())
       await send('request permission')
-      await frame.getByRole('button', { name: choice, exact: true }).click()
+      await clickAcrossChunk(frame.getByRole('button', { name: choice, exact: true }), nextThought)
       const tool = frame.locator('article.tool').last()
-      await tool.locator('summary').getByText('Fixture tool · Completed').waitFor()
+      await tool.locator('summary', { hasText: 'Fixture tool · Completed' }).waitFor()
       await tool.locator('summary').click()
       await tool.getByText(result, { exact: true }).waitFor()
     }
+    const nextThought = thoughts.nth(await thoughts.count())
     await send('wait for cancellation')
     await frame.getByText('Waiting for cancellation', { exact: true }).waitFor()
+    await clickAcrossChunk(frame.getByRole('button', { name: 'Stop', exact: true }), nextThought)
+    await frame.getByText('Stopped.', { exact: true }).waitFor()
+    await send('wait for cancellation')
+    await frame.getByRole('button', { name: 'Stop', exact: true }).waitFor()
     await frame.locator('textarea').click()
     await frame.locator('textarea').press('Escape')
-    await frame.getByText('Stopped.', { exact: true }).waitFor()
+    await frame.getByRole('button', { name: 'Send', exact: true }).waitFor()
+    await send('ignore cancellation')
+    await frame.getByRole('button', { name: 'Stop', exact: true }).click()
+    await frame.getByText('Harness did not stop in time.', { exact: false }).waitFor({ timeout: 20_000 })
+    await frame.getByRole('button', { name: 'Reconnect', exact: true }).click()
+    await frame.getByText('Connected', { exact: true }).waitFor()
   }
 
   const baseline = frame.getByLabel('Model', { exact: true })
@@ -492,6 +515,22 @@ try {
       const id = await frame.locator('#sessions select').inputValue()
       return id && id !== session ? true : undefined
     }, 'a new session after restarting the ACP profile')
+    const selector = frame.locator('#sessions select')
+    const retired = await selector.inputValue()
+    const database = join(workspace, '.acp-fixture-sessions.json')
+    const sessions: { sessionId: string }[] = JSON.parse(await readFile(database, 'utf8'))
+    await writeFile(database, JSON.stringify(sessions.filter(item => item.sessionId !== retired)))
+    await send('exit fixture')
+    const reconnect = frame.getByRole('button', { name: 'Reconnect', exact: true })
+    await reconnect.waitFor()
+    const composer = frame.locator('textarea')
+    await composer.fill('Keep this draft after an unavailable session')
+    await reconnect.click()
+    await frame.getByText('The previous Harness conversation is unavailable.', { exact: false }).waitFor()
+    assert.equal(await selector.inputValue(), '')
+    assert.equal(await composer.inputValue(), 'Keep this draft after an unavailable session')
+    await frame.getByRole('button', { name: 'Send', exact: true }).click()
+    await frame.locator('.assistant').getByText('Keep this draft after an unavailable session').waitFor()
     await settings('Use automatic discovery')
     await retry(async () => !(await readFile(join(profile, 'User', 'settings.json'), 'utf8')).includes(fixture) ? true : undefined, 'automatic dsh discovery')
   }

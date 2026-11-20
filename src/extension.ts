@@ -2,11 +2,12 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { join, relative } from 'node:path'
+import { RequestError } from '@agentclientprotocol/sdk'
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from '@agentclientprotocol/sdk'
 import { ConnectionError, findExecutable, startAcp, type AcpConnection } from './acp'
 import { History, type Entry } from './history'
-import { discardClipboardImage, draftFileBudget, fileBlock, fileMode, pickFile, saveClipboardImages } from './file-attachment'
-import { draftKey, readAction, type Approval, type Selection, type ViewAction, type ViewEvent, type ViewState } from './view-model'
+import { discardClipboardImage, draftFileBudget, fileBlock, fileMode, pickFile, pruneClipboardImages, saveClipboardImages } from './file-attachment'
+import { draftKey, readAction, readRequestId, type Approval, type Selection, type ViewAction, type ViewEvent, type ViewState } from './view-model'
 import { isLanguage, resolveLocale, uiStrings as strings, useLocale } from './strings'
 import { catalogKey, chooseExecutable, executableSetting, openAcpConfig, preferenceKey } from './settings'
 import { applyDefaultModel, modelGroups, type ModelGroup, type ModelPreference } from './model-preference'
@@ -15,6 +16,11 @@ import type { SessionConfigOption } from '@agentclientprotocol/sdk'
 const section = 'deepseekHarness'
 const viewId = `${section}.chat`
 const cancelled = { outcome: { outcome: 'cancelled' } } as const
+const stopTimeout = 10_000
+const streamPublishDelay = 32
+const streamSaveDelay = 250
+
+type Root = { path: string; name: string; uri: vscode.Uri }
 
 export function activate(context: vscode.ExtensionContext) {
   const chat = new HarnessView(context)
@@ -64,11 +70,18 @@ class HarnessView implements vscode.WebviewViewProvider {
   private connection?: AcpConnection
   private starting?: AcpConnection
   private processCwd?: string
-  private root?: { path: string; name: string }
+  private connectionError?: ConnectionError
+  private root?: Root
   private cursor?: string
   private generation = 0
   private disposed = false
   private operation?: Promise<void>
+  private restoration?: Promise<void>
+  private turn?: Promise<void>
+  private stopTimer?: ReturnType<typeof setTimeout>
+  private publishTimer?: ReturnType<typeof setTimeout>
+  private saveTimer?: ReturnType<typeof setTimeout>
+  private lastChunk?: { entry: Entry; messageId: string | null | undefined }
   private readonly selections = new Map<string, Selection[]>()
   private imagePrompts?: boolean
   private acceptFileTurn?: () => void
@@ -83,7 +96,14 @@ class HarnessView implements vscode.WebviewViewProvider {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     if (context.storageUri) this.history = new History(context.storageUri.fsPath)
+    if (vscode.workspace.isTrusted) {
+      void pruneClipboardImages(this.clipboardDirectory).catch(() => this.output.appendLine('Clipboard image cleanup failed'))
+    }
     this.refreshLanguage()
+  }
+
+  private get clipboardDirectory() {
+    return join((this.context.storageUri ?? this.context.globalStorageUri).fsPath, 'clipboard-images')
   }
 
   refreshEnterToSend() {
@@ -236,7 +256,14 @@ class HarnessView implements vscode.WebviewViewProvider {
 
   private receive(input: unknown) {
     const action = readAction(input)
-    if (!action || this.disposed) return
+    if (!action || this.disposed) {
+      if (input && typeof input === 'object' && 'type' in input) {
+        const id = readRequestId(input)
+        if (id && input.type === 'pasteImages') this.post({ type: 'pasteFinished', id, error: strings.pasteFailed })
+        if (id && input.type === 'send') this.post({ type: 'sendRejected', id })
+      }
+      return
+    }
     if (action.type === 'pasteImages') {
       if (this.state.busy || this.state.settings || !vscode.workspace.isTrusted || this.attachmentKey !== action.draft) {
         this.post({ type: 'pasteFinished', id: action.id, error: strings.pasteBusy })
@@ -245,8 +272,7 @@ class HarnessView implements vscode.WebviewViewProvider {
       this.run('pasteImages', async () => {
         let error: string | undefined
         try {
-          const storage = this.context.storageUri ?? this.context.globalStorageUri
-          const files = await saveClipboardImages(join(storage.fsPath, 'clipboard-images'), action.images, this.remainingFileBudget, this.imagePrompts)
+          const files = await saveClipboardImages(this.clipboardDirectory, action.images, this.remainingFileBudget, this.imagePrompts)
           if (this.disposed || this.attachmentKey !== action.draft) {
             await Promise.all(files.map(discardClipboardImage))
             error = strings.pasteBusy
@@ -279,7 +305,7 @@ class HarnessView implements vscode.WebviewViewProvider {
     }
     if (action.type === 'ready') {
       this.publish()
-      if (!this.root && !this.operation) this.run('restore', () => this.restore())
+      this.ensureRestore()
       return
     }
     if (action.type === 'diagnostics') { this.output.show(); return }
@@ -316,8 +342,15 @@ class HarnessView implements vscode.WebviewViewProvider {
       this.publish()
       return
     }
+    if (action.type === 'send') {
+      if (this.state.busy || this.state.settings || !vscode.workspace.isTrusted || (!action.text.trim() && !this.attachments.length)) {
+        this.post({ type: 'sendRejected', id: action.id })
+        return
+      }
+      this.turn = this.send(action.id, action.text).finally(() => { this.turn = undefined })
+      return
+    }
     if (this.state.busy || !vscode.workspace.isTrusted) return
-    if (action.type === 'send') { void this.send(action.id, action.text); return }
     this.run(action.type, async () => {
       switch (action.type) {
         case 'attachFiles': return this.attachFiles()
@@ -341,20 +374,28 @@ class HarnessView implements vscode.WebviewViewProvider {
     })
   }
 
-  private async restore() {
+  private ensureRestore(preferred?: Root) {
+    if (!this.restoration && !this.state.busy && vscode.workspace.isTrusted) {
+      this.restoration = this.run('restore', () => this.restore(preferred))
+    }
+    return this.restoration
+  }
+
+  private async restore(preferred?: Root) {
     const folders = vscode.workspace.workspaceFolders ?? []
     const previous = this.context.workspaceState.get<{ path: string; id: string }>('lastSession')
-    for (const folder of folders) {
-      const root = await this.folderRoot(folder)
-      if (root.path === previous?.path) {
-        this.setRoot(root)
-        this.state.sessionId = previous.id
-        await this.loadHistory(root.path, previous.id)
-        this.publish()
-        return this.open(root, previous.id)
-      }
+    const roots = preferred ? [preferred] : (await Promise.allSettled(folders.map(folder => this.folderRoot(folder))))
+      .flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    if (this.disposed) return
+    const previousRoot = previous && roots.find(root => root.path === previous.path)
+    if (previousRoot && previous) {
+      this.setRoot(previousRoot)
+      this.state.sessionId = previous.id
+      this.state.entries = await this.readHistory(previousRoot.path, previous.id)
+      this.publish()
+      return this.open(previousRoot, previous.id)
     }
-    if (folders.length === 1) this.setRoot(await this.folderRoot(folders[0]))
+    if (roots.length === 1) this.setRoot(roots[0])
   }
 
   private async chooseFolder() {
@@ -364,19 +405,30 @@ class HarnessView implements vscode.WebviewViewProvider {
     return folder && this.folderRoot(folder)
   }
 
-  private async folderRoot(folder: vscode.WorkspaceFolder) {
-    return { path: await realpath(folder.uri.fsPath), name: folder.name }
+  private async folderRoot(folder: vscode.WorkspaceFolder): Promise<Root> {
+    return { path: await realpath(folder.uri.fsPath), name: folder.name, uri: folder.uri }
   }
 
   private get remainingFileBudget() {
-    return this.attachments.reduce((budget, item) =>
-      item.kind === 'file' && item.payload ? budget - item.size : budget, draftFileBudget)
+    return this.attachmentModes(this.attachments).remaining
+  }
+
+  private attachmentModes(items: Selection[]) {
+    let remaining = draftFileBudget
+    const modes = new Map<string, ReturnType<typeof fileMode>>()
+    for (const item of items) {
+      if (item.kind !== 'file') continue
+      const mode = fileMode(item, this.imagePrompts, remaining)
+      if (mode !== 'fileLink') remaining -= item.size
+      modes.set(item.id, mode)
+    }
+    return { modes, remaining }
   }
 
   private async attachFiles() {
     const files = await vscode.window.showOpenDialog({
       canSelectFiles: true, canSelectFolders: false, canSelectMany: true, openLabel: strings.attachFiles,
-      defaultUri: vscode.workspace.workspaceFolders?.find(folder => folder.name === this.root?.name)?.uri,
+      defaultUri: this.root?.uri,
     })
     if (!files?.length || this.disposed) return
     const failed: string[] = []
@@ -412,6 +464,14 @@ class HarnessView implements vscode.WebviewViewProvider {
     }
     try {
       const root = await this.folderRoot(folder)
+      const firstOpen = !this.sidebar && !this.restoration
+      const restoring = this.ensureRestore(root)
+      if (firstOpen) {
+        await this.openChat()
+        if (!ask) await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup')
+      }
+      await restoring
+      if (this.disposed) return
       if (this.root?.path !== root.path && (this.state.sessionId || this.state.busy)) {
         void vscode.window.showWarningMessage(strings.selectionMismatch)
         return
@@ -421,9 +481,10 @@ class HarnessView implements vscode.WebviewViewProvider {
         this.attachments = [...this.attachments, snapshots]
       }
       this.state.settings = undefined
-      if (ask) this.state.composerFocus = randomUUID()
-      if (ask) await this.openChat()
-      else if (this.sidebar) this.sidebar.show(true)
+      if (ask) {
+        await this.openChat()
+        this.state.composerFocus = randomUUID()
+      } else if (this.sidebar) this.sidebar.show(true)
       else {
         await this.openChat()
         await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup')
@@ -432,7 +493,7 @@ class HarnessView implements vscode.WebviewViewProvider {
     } catch (error) { this.report('selection', error) }
   }
 
-  private setRoot(root: { path: string; name: string }) {
+  private setRoot(root: Root) {
     if (this.root?.path !== root.path) {
       this.cursor = undefined
       this.state.hasMore = false
@@ -447,6 +508,7 @@ class HarnessView implements vscode.WebviewViewProvider {
     if (!vscode.workspace.isTrusted || this.disposed) throw new Error(strings.trust)
     if (this.connection) return this.connection
     const generation = ++this.generation
+    this.connectionError = undefined
     this.state.connection = 'connecting'
     this.publish()
     try {
@@ -475,26 +537,64 @@ class HarnessView implements vscode.WebviewViewProvider {
     } finally { this.starting = undefined; this.publish() }
   }
 
-  private async open(root?: { path: string; name: string }, id?: string, fromSend = false) {
+  private async resume(connection: AcpConnection, root: Root, id: string) {
+    try { return await connection.resume(root.path, id) } catch (error) {
+      if (!(error instanceof RequestError) || error.code !== -32602
+        || !/session is not resumable|session cwd does not match|session not found/i.test(error.message)) throw error
+      if (this.root?.path === root.path) {
+        if (!this.activeId && this.state.sessionId === id) {
+          if (this.saveTimer) this.persist()
+          const draft = this.attachments
+          this.selections.delete(this.attachmentKey)
+          this.state.sessionId = undefined
+          this.state.entries = []
+          this.attachments = [...this.attachments, ...draft]
+          this.setError(strings.sessionUnavailable)
+          this.publish()
+          const previous = this.context.workspaceState.get<{ path: string; id: string }>('lastSession')
+          if (previous?.id === id && previous.path === root.path) {
+            await this.context.workspaceState.update('lastSession', undefined).then(undefined,
+              () => this.output.appendLine('Could not clear the saved session reference'))
+          }
+        }
+        try { await this.list(false) } catch { this.output.appendLine('Session list refresh failed after resume') }
+      }
+      throw new Error(strings.sessionUnavailable)
+    }
+  }
+
+  private async open(root?: Root, id?: string, fromSend = false) {
     if (!root) return
-    const connection = await this.connect(root.path)
+    let connection = await this.connect(root.path)
     const oldId = this.state.sessionId
     if (oldId && oldId === id && this.state.connection === 'connected' && this.activeId === id) return
     const preference = this.context.globalState.get<ModelPreference>(preferenceKey)
-    const response = id ? await connection.resume(root.path, id) : await connection.create(root.path)
+    const response = id ? await this.resume(connection, root, id) : await connection.create(root.path)
     if (connection !== this.connection || this.disposed) return
     const sessionId = id ?? ('sessionId' in response ? response.sessionId : undefined)
     if (typeof sessionId !== 'string') throw new Error(strings.failedOperation)
-    let options = response.configOptions ?? []
-    try {
-      await this.rememberCatalog(options)
-      if (!id) options = await applyDefaultModel(options, preference, async value =>
-        (await connection.configure(sessionId, 'model', value)).configOptions, strings.modelUnavailable)
-      if (this.activeId) await connection.close(this.activeId)
-    } catch (error) {
-      await connection.close(sessionId)
-      throw error
+    const configure = async (transport: AcpConnection, options: SessionConfigOption[] = []) => {
+      try {
+        await this.rememberCatalog(options)
+        return id ? options : await applyDefaultModel(options, preference, async value =>
+          (await transport.configure(sessionId, 'model', value)).configOptions, strings.modelUnavailable)
+      } catch (error) {
+        await this.closeSession(transport, sessionId)
+        throw error
+      }
     }
+    let options = await configure(connection, response.configOptions ?? [])
+    if (this.activeId && !await this.closeSession(connection, this.activeId)) {
+      this.resetConnection()
+      await connection.dispose()
+      if (this.disposed) return
+      connection = await this.connect(root.path)
+      options = await configure(connection, (await this.resume(connection, root, sessionId)).configOptions ?? [])
+      this.setError()
+    }
+    if (connection !== this.connection || this.disposed) return
+    if (this.saveTimer) this.persist()
+    const entries = id ? await this.readHistory(root.path, sessionId) : []
     if (connection !== this.connection || this.disposed) return
     const previousAttachmentKey = this.attachmentKey
     const outgoingAttachments = this.attachments
@@ -507,7 +607,7 @@ class HarnessView implements vscode.WebviewViewProvider {
       this.attachments = outgoingAttachments
     }
     this.state.options = options
-    await this.loadHistory(root.path, sessionId, !id)
+    this.state.entries = entries
     await this.context.workspaceState.update('lastSession', { path: root.path, id: sessionId })
     this.publish()
     if (!fromSend) await this.list(false)
@@ -533,15 +633,14 @@ class HarnessView implements vscode.WebviewViewProvider {
     ].map(item => [item.id, item])).values()]
   }
 
-  private async loadHistory(cwd: string, sessionId: string, fresh = false) {
-    this.state.entries = []
-    if (fresh) return
+  private async readHistory(cwd: string, sessionId: string): Promise<Entry[]> {
     try {
       const value = await this.history?.load(cwd, sessionId)
-      this.state.entries = value?.entries ?? [{ kind: 'notice', id: randomUUID(), text: strings.noHistory }]
-      if (value?.inProgress) this.notice(strings.interrupted)
+      if (!value) return [{ kind: 'notice', id: randomUUID(), text: strings.noHistory }]
+      if (value.inProgress) value.entries.push({ kind: 'notice', id: randomUUID(), text: strings.interrupted })
+      return value.entries
     } catch {
-      this.notice(strings.lostHistory)
+      return [{ kind: 'notice', id: randomUUID(), text: strings.lostHistory }]
     }
   }
 
@@ -549,22 +648,32 @@ class HarnessView implements vscode.WebviewViewProvider {
     if (!this.root || !this.state.sessionId) return
     const confirm = await vscode.window.showWarningMessage(strings.clearConfirm, { modal: true }, strings.clearAction)
     if (confirm !== strings.clearAction) return
-    await this.history?.clear(this.root.path, this.state.sessionId)
+    if (this.saveTimer) this.persist()
+    const entries = this.state.entries
     this.state.entries = []
+    try { await this.history?.clear(this.root.path, this.state.sessionId) } catch (error) {
+      this.state.entries = [...entries, ...this.state.entries]
+      throw error
+    }
   }
 
   private async restartNew() {
     if (this.connection) {
       const connection = this.connection
-      if (this.activeId) await connection.close(this.activeId)
-      this.activeId = undefined
-      this.connection = undefined
-      ++this.generation
+      const activeId = this.activeId
+      this.resetConnection()
+      if (activeId) await this.closeSession(connection, activeId, 1500)
       await connection.dispose()
     }
     this.state.connection = 'idle'
-    this.state.sessionId = undefined
     await this.open(this.root ?? await this.chooseFolder())
+  }
+
+  private async closeSession(connection: AcpConnection, id: string, timeout?: number) {
+    try { await connection.close(id, timeout); return true } catch {
+      this.output.appendLine('ACP session close failed')
+      return false
+    }
   }
 
   private async configure(id: string, value: string) {
@@ -575,11 +684,11 @@ class HarnessView implements vscode.WebviewViewProvider {
   }
 
   private async send(id: string, text: string) {
-    if (!text.trim() && !this.attachments.length) return
     const previousKey = draftKey(this.root?.path, this.state.sessionId)
     const selection = [...this.attachments]
+    let accepted = false
     this.state.busy = true
-    this.state.error = undefined
+    this.setError()
     this.publish()
     try {
       if (!this.activeId) await this.open(this.root ?? await this.chooseFolder(), this.state.sessionId, true)
@@ -588,14 +697,16 @@ class HarnessView implements vscode.WebviewViewProvider {
       if (!connection || !sessionId || this.disposed) return
       const blocks: Parameters<AcpConnection['prompt']>[1] = []
       const transcript: string[] = []
+      const { modes } = this.attachmentModes(selection)
       for (const item of selection) {
         if (item.kind === 'file') {
-          try { blocks.push(await fileBlock(item, !!this.imagePrompts)) }
+          const mode = modes.get(item.id)!
+          try { blocks.push(await fileBlock(item, !!this.imagePrompts, mode !== 'fileLink')) }
           catch {
-            this.state.error = `${strings.fileUnreadable} ${item.name}`
+            this.setError(`${strings.fileUnreadable} ${item.name}`)
             return
           }
-          transcript.push(`📎 ${item.name} · ${strings[fileMode(item, this.imagePrompts)]}`)
+          transcript.push(`📎 ${item.name} · ${strings[mode]}`)
         } else {
           const content = item.kind === 'editor'
             ? `Editor selection in ${item.file}, lines ${item.lines} (${item.language}):\n${item.text}`
@@ -604,14 +715,16 @@ class HarnessView implements vscode.WebviewViewProvider {
           transcript.push(content)
         }
       }
+      if (this.disposed || this.connection !== connection) return
       if (text.trim()) { blocks.push(text.trim()); transcript.push(text.trim()) }
       this.state.entries.push({ kind: 'user', id: randomUUID(), text: transcript.join('\n\n') })
       this.state.running = true
       void vscode.commands.executeCommand('setContext', 'deepseekHarness.running', true)
       const accept = () => {
         this.acceptFileTurn = undefined
+        accepted = true
         for (const item of selection) {
-          if (item.kind === 'file' && fileMode(item, this.imagePrompts) === 'fileImage') {
+          if (item.kind === 'file' && modes.get(item.id) === 'fileImage') {
             void discardClipboardImage(item).catch(() => this.output.appendLine('Clipboard image cleanup failed'))
           }
         }
@@ -630,23 +743,34 @@ class HarnessView implements vscode.WebviewViewProvider {
       if (this.state.running) this.notice(strings.interrupted)
       this.report('prompt', error)
     } finally {
+      clearTimeout(this.stopTimer)
+      this.stopTimer = undefined
       this.acceptFileTurn = undefined
       this.state.busy = this.state.running = this.state.stopping = false
       void vscode.commands.executeCommand('setContext', 'deepseekHarness.running', false)
       this.cancelApprovals()
       this.persist()
+      if (!accepted) this.post({ type: 'sendRejected', id })
       this.publish()
     }
   }
 
   async stop() {
-    if (!this.connection || !this.activeId || !this.state.running || this.state.stopping) return
+    const connection = this.connection
+    if (!connection || !this.activeId || !this.state.running || this.state.stopping) return
     this.state.stopping = true
     this.publish()
+    const timer = this.stopTimer = setTimeout(() => {
+      connection.abort(new ConnectionError('timeout', strings.stopTimeout))
+    }, stopTimeout)
     try {
-      await this.connection.cancel(this.activeId)
+      const sending = connection.cancel(this.activeId)
       this.cancelApprovals()
+      await sending
     } catch (error) {
+      if (this.stopTimer !== timer) return
+      clearTimeout(timer)
+      this.stopTimer = undefined
       this.state.stopping = false
       this.report('cancel', error)
       this.publish()
@@ -663,10 +787,14 @@ class HarnessView implements vscode.WebviewViewProvider {
     if (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk') {
       const kind = update.sessionUpdate === 'agent_message_chunk' ? 'assistant' : 'thought'
       if (update.content.type === 'text') {
-        const id = `${kind}:${update.messageId ?? 'current'}`
         const last = this.state.entries.at(-1)
-        if (last?.kind === kind && last.id === id) last.text += update.content.text
-        else this.state.entries.push({ kind, id, text: update.content.text })
+        if (last?.kind === kind && this.lastChunk?.entry === last && this.lastChunk.messageId === update.messageId) {
+          last.text += update.content.text
+        } else {
+          const entry: Entry = { kind, id: randomUUID(), text: update.content.text }
+          this.state.entries.push(entry)
+          this.lastChunk = { entry, messageId: update.messageId }
+        }
       }
     }
     if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
@@ -679,8 +807,8 @@ class HarnessView implements vscode.WebviewViewProvider {
       else if (update.content?.length) row.output = displayValue(update.content)
       if (!existing) this.state.entries.push(row)
     }
-    this.persist()
-    this.publish()
+    this.saveTimer ??= setTimeout(() => this.persist(), streamSaveDelay)
+    this.publishTimer ??= setTimeout(() => this.publish(), streamPublishDelay)
   }
 
   private permission(params: RequestPermissionRequest, signal: AbortSignal): Promise<RequestPermissionResponse> {
@@ -706,14 +834,20 @@ class HarnessView implements vscode.WebviewViewProvider {
     for (const approval of this.approvals.values()) approval.finish(cancelled)
   }
 
-  private disconnect(error: ConnectionError) {
+  private resetConnection() {
     ++this.generation
     this.connection = undefined
     this.activeId = undefined
+    this.processCwd = undefined
     this.state.connection = 'disconnected'
     this.imagePrompts = undefined
     this.state.canList = false
     this.state.options = []
+  }
+
+  private disconnect(error: ConnectionError) {
+    this.resetConnection()
+    this.connectionError = error
     this.cancelApprovals()
     this.report('connection', error)
     this.publish()
@@ -724,37 +858,44 @@ class HarnessView implements vscode.WebviewViewProvider {
     const known = error instanceof Error && Object.values(strings).includes(error.message)
     const authentication = error instanceof Error
       && /authentication fail|invalid[ _-]+api[ _-]+key|incorrect api key|invalid credentials|\b401\b|ACCOUNT_SIGN_IN_REQUIRED|ACCOUNT_TOKEN_INVALID|MISSING_CREDENTIAL|INVALID_CREDENTIAL|no credential for provider route|sign in to (?:your )?DeepSeek/i.test(error.message)
-    this.state.authenticationError = authentication
-    this.state.missingExecutable = kind === 'executable'
-    this.state.error = authentication ? strings.authentication : known ? error.message : kind === 'executable' ? strings.missing
-      : stage === 'connection' ? strings.connectionError : strings.failedOperation
+    const disconnected = this.state.connection === 'disconnected' ? this.connectionError : undefined
+    const message = authentication ? strings.authentication : known ? error.message : kind === 'executable' ? strings.missing
+      : disconnected?.message === strings.stopTimeout ? strings.stopTimeout
+      : disconnected || error instanceof ConnectionError || stage === 'connection' ? strings.connectionError : strings.failedOperation
+    this.setError(message, authentication ? 'authentication' : kind === 'executable' ? 'executable' : undefined)
     const status = error instanceof ConnectionError && ['exit', 'spawn'].includes(error.kind) ? ` (${error.message})` : ''
     this.output.appendLine(`${stage}: ${authentication ? 'model authentication failed' : kind}${status}`)
   }
 
+  private setError(error?: string, kind?: 'authentication' | 'executable') {
+    this.state.error = error
+    this.state.authenticationError = kind === 'authentication'
+    this.state.missingExecutable = kind === 'executable'
+  }
+
   private run(stage: string, action: () => Promise<void>) {
     this.state.busy = true
-    if (stage !== 'attachFiles' && stage !== 'pasteImages') {
-      this.state.error = undefined
-      this.state.missingExecutable = false
-    }
+    if (stage !== 'attachFiles' && stage !== 'pasteImages') this.setError()
     this.publish()
     this.operation = action().catch(error => this.report(stage, error)).finally(() => {
       this.operation = undefined
       this.state.busy = false
       this.publish()
     })
+    return this.operation
   }
 
   private notice(text: string) { this.state.entries.push({ kind: 'notice', id: randomUUID(), text }) }
 
-  private lastSave?: Promise<void>
   private persist() {
+    clearTimeout(this.saveTimer)
+    this.saveTimer = undefined
     if (!this.history || !this.root || !this.state.sessionId) return
-    this.lastSave = this.history.save(this.root.path, this.state.sessionId, {
+    void this.history.save(this.root.path, this.state.sessionId, {
       version: 1, inProgress: this.state.running, entries: this.state.entries,
     }).catch(() => {
-      this.state.error = strings.saveError
+      if (this.state.error) return
+      this.setError(strings.saveError)
       this.publish()
     })
   }
@@ -762,10 +903,14 @@ class HarnessView implements vscode.WebviewViewProvider {
   private post(event: ViewEvent) { void this.view?.postMessage(event) }
 
   private publish() {
+    clearTimeout(this.publishTimer)
+    this.publishTimer = undefined
+    if (this.disposed) return
     if (this.state.settings) this.state.settings.groups = this.settingsGroups()
     this.state.revision++
+    const { modes } = this.attachmentModes(this.attachments)
     this.state.attachments = this.attachments.map(item => item.kind === 'file' ? {
-      id: item.id, label: item.name, file: { size: item.size, mode: fileMode(item, this.imagePrompts), path: item.path },
+      id: item.id, label: item.name, file: { size: item.size, mode: modes.get(item.id)!, path: item.path },
     } : ({
       id: item.id, label: item.kind === 'editor' ? `${item.file}:${item.lines}` : `“${item.text.replace(/\s+/g, ' ').slice(0, 80)}”`,
     }))
@@ -775,20 +920,21 @@ class HarnessView implements vscode.WebviewViewProvider {
 
   async dispose() {
     this.disposed = true
+    clearTimeout(this.stopTimer)
+    this.stopTimer = undefined
+    clearTimeout(this.publishTimer)
     this.cancelApprovals()
     const connection = this.connection
-    if (connection && this.activeId) {
-      try { await connection.close(this.activeId, 1500) } catch {
-        // Closing the transport below also asks the Harness to drain its sessions.
-      }
-    }
+    if (connection && this.activeId) await this.closeSession(connection, this.activeId, 1500)
     await Promise.all([connection?.dispose(), this.starting?.dispose()])
+    await this.turn
+    if (this.saveTimer) this.persist()
     for (const items of this.selections.values()) {
       for (const item of items) {
-        if (item.kind === 'file' && !this.state.running) await discardClipboardImage(item).catch(() => {})
+        if (item.kind === 'file') await discardClipboardImage(item).catch(() => {})
       }
     }
-    await this.lastSave
+    await this.history?.flush()
   }
 }
 

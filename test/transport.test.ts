@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import type { SessionUpdate } from '@agentclientprotocol/sdk'
-import { findExecutable, startAcp } from '../src/acp'
+import { dshHome, findExecutable, startAcp } from '../src/acp'
 import { History, type Transcript } from '../src/history'
-import { readAction } from '../src/view-model'
+import { draftKey, readAction, setDraft, switchDraft } from '../src/view-model'
 import { resolveLocale } from '../src/strings'
 
 test('follows the editor language unless the user chooses an explicit locale', () => {
@@ -96,8 +96,55 @@ test('persists versioned workspace history without intermediate or duplicate ent
   } finally { await rm(cwd, { recursive: true, force: true }) }
 })
 
+test('coalesces pending history writes without coalescing across a clear', async t => {
+  const cwd = await temporary()
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  const history = new History(cwd)
+  const entries: Transcript['entries'] = []
+  const first = history.save(cwd, 'session', { version: 1, entries, inProgress: true })
+  for (let index = 0; index < 20; index++) {
+    entries.push({ kind: 'assistant', id: 'assistant:current', text: String(index) })
+    assert.equal(history.save(cwd, 'session', { version: 1, entries, inProgress: false }), first)
+  }
+  const loaded = await history.load(cwd, 'session')
+  assert.deepEqual(loaded?.entries.map(entry => 'text' in entry && entry.text), entries.map((_, i) => String(i)))
+  assert.equal(new Set(loaded?.entries.map(entry => entry.id)).size, entries.length)
+  assert.deepEqual(await history.load(cwd, 'session'), loaded)
+  const pending = history.save(cwd, 'session', { version: 1, entries, inProgress: true })
+  const cleared = history.clear(cwd, 'session')
+  const after = history.save(cwd, 'session', { version: 1, entries: [], inProgress: false })
+  assert.notEqual(pending, after)
+  await Promise.all([pending, cleared, after])
+  assert.deepEqual(await history.load(cwd, 'session'), { version: 1, entries: [], inProgress: false })
+})
+
+test('normalizes padded home shorthand consistently with existing literal paths', async t => {
+  const cwd = await temporary()
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  assert.equal(dshHome(cwd, '  ~/test-acp  '), join(homedir(), 'test-acp'))
+  assert.equal(dshHome(cwd, '  ~  '), homedir())
+  assert.equal(dshHome(cwd, 'literal path '), join(cwd, 'literal path '))
+})
+
 test('rejects malformed webview requests', () => {
   assert.deepEqual(readAction({ type: 'send', id: 'a', text: 'hi' }), { type: 'send', id: 'a', text: 'hi' })
   assert.equal(readAction({ type: 'send', id: 'a', text: {} }), undefined)
   assert.equal(readAction({ type: 'permission', id: 'a', optionId: false }), undefined)
+})
+
+test('preserves carried drafts even when the destination draft was previously cleared to empty', () => {
+  const session = draftKey('/workspace', 'old-session')
+  const workspace = draftKey('/workspace')
+  const drafts: Record<string, string> = { [session]: 'Keep this draft', [workspace]: '' }
+  assert.deepEqual(switchDraft(drafts, session, workspace, 'Keep this draft', true), { text: 'Keep this draft', carried: true })
+  assert.deepEqual(drafts, { [workspace]: 'Keep this draft' })
+
+  setDraft(drafts, workspace, '')
+  assert.deepEqual(drafts, {})
+
+  const existing: Record<string, string> = { [session]: 'Session draft', [workspace]: 'Existing workspace draft' }
+  assert.deepEqual(switchDraft(existing, session, workspace, 'Session draft', true), { text: 'Existing workspace draft', carried: false })
+  assert.deepEqual(existing, { [session]: 'Session draft', [workspace]: 'Existing workspace draft' })
+
+  assert.deepEqual(switchDraft(existing, workspace, session, 'Existing workspace draft', false), { text: 'Session draft', carried: false })
 })

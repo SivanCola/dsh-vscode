@@ -3,7 +3,7 @@
   "displayName": "dsh-vscode-mini",
   "description": "Run DeepSeek Harness in VS Code through ACP v1.",
   "icon": "media/marketplace-icon.png",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "SivanLiu",
   "license": "Apache-2.0",
   "repository": "https://github.com/SivanCola/dsh-vscode",

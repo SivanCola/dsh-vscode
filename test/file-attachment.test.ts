@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
-import { discardClipboardImage, draftFileBudget, fileBlock, fileMode, pickFile, saveClipboardImages } from '../src/file-attachment'
+import { runInNewContext } from 'node:vm'
+import { discardClipboardImage, draftFileBudget, fileBlock, fileMode, pickFile, pruneClipboardImages, saveClipboardImages } from '../src/file-attachment'
 import { readAction } from '../src/view-model'
 
 test('clipboard images can be linked, removed, and rolled back after a bad batch', async t => {
@@ -13,6 +14,7 @@ test('clipboard images can be linked, removed, and rolled back after a bad batch
   const png = Uint8Array.from(Buffer.from('89504e470d0a1a0a', 'hex')).buffer
   const action = { type: 'pasteImages', id: '1', draft: 'draft', images: [png] }
   assert.deepEqual(readAction(action), action)
+  assert.equal(readAction({ ...action, images: [runInNewContext('new ArrayBuffer(8)')] })?.type, 'pasteImages')
   assert.equal(readAction({ ...action, images: ['not bytes'] }), undefined)
   const [file] = await saveClipboardImages(dir, [png], draftFileBudget, false)
   assert.deepEqual(await readFile(file.path), Buffer.from(png))
@@ -20,6 +22,18 @@ test('clipboard images can be linked, removed, and rolled back after a bad batch
   await discardClipboardImage(file)
   await assert.rejects(saveClipboardImages(dir, [png, new ArrayBuffer(8)], draftFileBudget))
   assert.deepEqual(await readdir(dir), [])
+})
+
+test('expires old clipboard files while keeping recent links and unrelated files', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-paste-retention-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const png = Uint8Array.from(Buffer.from('89504e470d0a1a0a', 'hex')).buffer
+  const [expired, recent] = await saveClipboardImages(dir, [png, png], draftFileBudget, false)
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+  await Promise.all([utimes(expired.path, old, old), utimes(recent.path, old, old), writeFile(join(dir, 'keep.png'), '')])
+  await fileBlock(recent, false)
+  await pruneClipboardImages(dir)
+  assert.deepEqual((await readdir(dir)).sort(), [recent.path.slice(dir.length + 1), 'keep.png'].sort())
 })
 
 test('captures text at selection time and keeps large or binary files as resource links', async t => {

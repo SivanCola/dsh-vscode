@@ -21,6 +21,7 @@ function isEntry(value: unknown): value is Entry {
 
 export class History {
   private pending = Promise.resolve()
+  private readonly queued = new Map<string, { content: string; done: Promise<void> }>()
 
   constructor(private readonly root: string) {}
 
@@ -44,27 +45,51 @@ export class History {
       || !('inProgress' in value) || typeof value.inProgress !== 'boolean') {
       throw new Error('Invalid transcript file')
     }
-    return { version: 1, entries: value.entries, inProgress: value.inProgress }
+    const seen = new Set<string>()
+    const entries = value.entries.map((entry, index) => {
+      const key = `${entry.kind}:${entry.id}`
+      const duplicate = seen.has(key)
+      seen.add(key)
+      if (!duplicate || (entry.kind !== 'assistant' && entry.kind !== 'thought')) return entry
+      const id = createHash('sha256').update(JSON.stringify([cwd, entry.id, index])).digest('hex')
+      return { ...entry, id: `legacy:${id}` }
+    })
+    return { version: 1, entries, inProgress: value.inProgress }
   }
 
   save(cwd: string, id: string, value: Transcript) {
     const path = this.path(cwd, id)
     const content = JSON.stringify(value)
-    return this.enqueue(async () => {
-      await mkdir(this.root, { recursive: true })
-      const temp = `${path}.${randomUUID()}.tmp`
-      try {
-        await writeFile(temp, content, { mode: 0o600 })
-        await rename(temp, path)
-      } finally {
-        await rm(temp, { force: true })
-      }
-    })
+    const queued = this.queued.get(path)
+    if (queued) {
+      queued.content = content
+      return queued.done
+    }
+    const snapshot = {
+      content,
+      done: this.enqueue(async () => {
+        if (this.queued.get(path) === snapshot) this.queued.delete(path)
+        await mkdir(this.root, { recursive: true })
+        const temp = `${path}.${randomUUID()}.tmp`
+        try {
+          await writeFile(temp, snapshot.content, { mode: 0o600 })
+          await rename(temp, path)
+        } finally {
+          await rm(temp, { force: true })
+        }
+      }),
+    }
+    this.queued.set(path, snapshot)
+    return snapshot.done
   }
 
   clear(cwd: string, id: string) {
-    return this.enqueue(() => rm(this.path(cwd, id), { force: true }))
+    const path = this.path(cwd, id)
+    this.queued.delete(path)
+    return this.enqueue(() => rm(path, { force: true }))
   }
+
+  flush() { return this.pending }
 
   private enqueue(write: () => Promise<void>) {
     const operation = this.pending.then(write)

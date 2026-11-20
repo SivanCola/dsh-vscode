@@ -56,18 +56,27 @@ export type ViewAction =
   | { type: 'permission'; id: string; optionId: string }
   | { type: 'configure'; id: string; value: string }
 
+export function readRequestId(input: object) {
+  return 'id' in input && typeof input.id === 'string' && input.id.length < 500 ? input.id : undefined
+}
+
+const arrayBufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength')!.get!
+
 export function readAction(input: unknown): ViewAction | undefined {
   if (typeof input !== 'object' || input === null || !('type' in input)) return
-  const id = 'id' in input && typeof input.id === 'string' && input.id.length < 500 ? input.id : undefined
+  const id = readRequestId(input)
   switch (input.type) {
     case 'pasteImages': {
       if (!id || !('draft' in input) || typeof input.draft !== 'string' || !('images' in input)
         || !Array.isArray(input.images) || !input.images.length || input.images.length > maxPasteImages) return
       let bytes = 0
-      for (const image of input.images) {
-        if (!(image instanceof ArrayBuffer) || !image.byteLength) return
-        bytes += image.byteLength
-      }
+      try {
+        for (const image of input.images) {
+          const length = arrayBufferLength.call(image) as number
+          if (!length) return
+          bytes += length
+        }
+      } catch { return }
       return bytes <= maxPasteBytes ? { type: 'pasteImages', id, draft: input.draft, images: input.images } : undefined
     }
     case 'focusReceived': return id ? { type: 'focusReceived', id } : undefined
@@ -107,9 +116,24 @@ export type ViewEvent =
   | { type: 'submit' }
   | { type: 'state'; state: ViewState }
   | { type: 'accepted'; id: string; sessionKey: string }
+  | { type: 'sendRejected'; id: string }
 
 export function draftKey(cwd?: string, sessionId?: string) {
   return JSON.stringify([cwd ?? '', sessionId ?? ''])
+}
+
+export function setDraft(drafts: Record<string, string>, key: string, value: string) {
+  if (value) drafts[key] = value
+  else delete drafts[key]
+}
+
+export function switchDraft(drafts: Record<string, string>, from: string, to: string, current: string, carry: boolean) {
+  if (carry && !drafts[to]) {
+    setDraft(drafts, to, current)
+    delete drafts[from]
+    return { text: current, carried: true }
+  }
+  return { text: drafts[to] ?? '', carried: false }
 }
 
 export const maxPasteBytes = 8 * 1024 * 1024

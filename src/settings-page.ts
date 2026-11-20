@@ -43,7 +43,10 @@ export function settingsPage(post: (action: ViewAction) => void) {
   function populateModels() {
     const selected = group()
     model.replaceChildren(...(selected?.models ?? []).map(item => new Option(item.name, item.value)))
-    if (selected && selected.id === snapshot?.preference?.group) model.value = snapshot.preference.value
+    const stored = snapshot?.preference
+    if (selected && stored?.group === selected.id && selected.models.some(item => item.value === stored.value)) {
+      model.value = stored.value
+    }
     page.querySelector<HTMLElement>('#defaultModelField')!.hidden = !selected
     updateSave()
   }

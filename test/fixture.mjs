@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
+import { randomUUID } from 'node:crypto'
 
 const database = '.acp-fixture-sessions.json'
 const sessions = existsSync(database) ? JSON.parse(readFileSync(database, 'utf8')) : []
@@ -13,6 +14,15 @@ const update = (sessionId, fields) => output({ method: 'session/update', params:
 const reply = (id, result) => output({ id, result })
 let waiting
 let permissionId = 100
+let rejectClose = false
+
+function streamThoughts(turn) {
+  const stream = setInterval(() => {
+    if (waiting !== turn) { clearInterval(stream); return }
+    update(turn.sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Chunk ' } })
+  }, 100)
+  stream.unref()
+}
 
 for await (const line of createInterface({ input: process.stdin })) {
   const { method, id, params, result } = JSON.parse(line)
@@ -21,7 +31,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       reply(id, { protocolVersion: 1, agentCapabilities: capabilities })
       break
     case 'session/new': {
-      const sessionId = `fixture-${sessions.length + 1}`
+      const sessionId = randomUUID()
       sessions.unshift({ sessionId, cwd: params.cwd, title: `Test conversation ${sessions.length + 1}` })
       writeFileSync(database, JSON.stringify(sessions))
       reply(id, { sessionId, configOptions })
@@ -31,10 +41,14 @@ for await (const line of createInterface({ input: process.stdin })) {
       reply(id, { sessions: sessions.filter(row => row.cwd === params.cwd) })
       break
     case 'session/resume':
-      reply(id, { configOptions })
+      if (sessions.some(row => row.sessionId === params.sessionId && row.cwd === params.cwd)) reply(id, { configOptions })
+      else output({ id, error: { code: -32602, message: 'Invalid params: session is not resumable' } })
       break
     case 'session/close':
-      reply(id, {})
+      if (rejectClose) {
+        rejectClose = false
+        output({ id, error: { code: -32603, message: 'Fixture close failed' } })
+      } else reply(id, {})
       break
     case 'session/set_config_option':
       configOptions[0].currentValue = params.value
@@ -48,13 +62,15 @@ for await (const line of createInterface({ input: process.stdin })) {
       }).join('\n')
       if (text === 'exit fixture') process.exit(9)
       if (text === 'simulate auth failure') {
+        rejectClose = true
         output({ id, error: { code: -32603, message: 'Model provider returned 401' } })
         break
       }
       const { sessionId } = params
-      if (text === 'wait for cancellation') {
-        waiting = { id, sessionId }
+      if (text === 'wait for cancellation' || text === 'ignore cancellation') {
+        waiting = { id, sessionId, ignoreCancel: text === 'ignore cancellation' }
         update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Waiting for cancellation' } })
+        streamThoughts(waiting)
       } else if (text === 'request permission') {
         const toolCallId = `tool-${permissionId}`
         waiting = { id, sessionId, toolCallId, permissionId }
@@ -63,6 +79,7 @@ for await (const line of createInterface({ input: process.stdin })) {
           { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
           { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
         ] } })
+        streamThoughts(waiting)
       } else {
         const marker = text.includes('UNSAVED_HARNESS_MARKER') ? 'UNSAVED_HARNESS_MARKER' : text
         update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `Received **${marker}**` } })
@@ -71,7 +88,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       break
     }
     case 'session/cancel':
-      if (waiting) {
+      if (waiting && !waiting.ignoreCancel) {
         reply(waiting.id, { stopReason: 'cancelled' })
         waiting = undefined
       }
