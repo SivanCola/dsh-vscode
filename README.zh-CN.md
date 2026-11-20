@@ -11,7 +11,7 @@
 扩展在选择时读取最多 256 KiB 的 UTF-8 文本。ACP 连接支持图片输入时，PNG、JPEG、GIF 和 WebP 可随消息发送。每份草稿最多内嵌 8 MiB 的文件内容。PDF、其他二进制文件、超出内嵌额度的文件，以及连接不支持的图片，会标为 **本地文件引用**，Harness 可按路径读取。发送引用时需保留原文件。
 
 1. 安装 DeepSeek Harness，并为 `acp` profile 配置可用模型和凭据。
-2. 在 VS Code 命令面板运行 **从 VSIX 安装**，选择 `artifacts/dsh-vscode-sivan-<版本>.vsix`。扩展的市场 ID 为 `SivanLiu.dsh-vscode-sivan`。
+2. 在扩展市场搜索 **dsh-vscode-mini**，扩展 ID 为 `SivanLiu.dsh-vscode-sivan`。离线安装时，在命令面板运行 **从 VSIX 安装**，选择 `artifacts/dsh-vscode-sivan-<版本>.vsix`。
 3. 扩展从工作区宿主的 PATH 和 macOS 常见安装位置查找 `dsh`。找不到时，点击侧栏的 **选择 dsh 可执行文件**，或在用户设置填写 `deepseekHarness.executablePath` 的绝对路径。macOS 应用安装的常见路径为 `/usr/local/bin/dsh`。
 
 在 **Harness 设置 → 消息输入** 中，**按 Enter 发送消息** 默认开启，Shift+Enter 在光标处换行。关闭此项后，单按 Enter 也会换行。⌘Enter（Windows/Linux 为 Ctrl+Enter）仍可发送，Esc 可停止运行中的任务；这两个命令可以在 **配置快捷键** 中改绑。设置页也可选择 dsh、打开 ACP 配置和查看诊断。可执行文件在下次连接时生效。

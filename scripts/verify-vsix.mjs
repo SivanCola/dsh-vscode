@@ -9,7 +9,7 @@ unzip('-tq', archive)
 const entries = unzip('-Z1', archive).trimEnd().split('\n')
 const packaged = JSON.parse(unzip('-p', archive, 'extension/package.json'))
 
-for (const key of ['name', 'publisher', 'version', 'license', 'main', 'icon']) {
+for (const key of ['name', 'displayName', 'publisher', 'version', 'license', 'main', 'icon']) {
   assert.equal(packaged[key], manifest[key], `Packaged manifest differs at ${key}`)
 }
 

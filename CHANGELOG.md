@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.2
+
+- Use dsh-vscode-mini as the display name in VS Code Marketplace and Open VSX.
+- Use `SivanLiu.dsh-vscode-sivan` as the extension ID in both marketplaces.
+
 ## 0.0.1
 
 - First public release of the DeepSeek Harness sidebar for VS Code.
