@@ -35,8 +35,10 @@ jobs:
         if: inputs.release-tag != ''
         run: |
           version="$(node -p "require('./package.json').version")"
-          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$RELEASE_TAG" != "v$version" ]]; then
-            echo "::error::Expected a stable release tag matching package.json, got $RELEASE_TAG for version $version."
+          name="$(node -p "require('./package.json').name")"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+             [[ "$RELEASE_TAG" != "v$version" && "$RELEASE_TAG" != "v$version-$name" ]]; then
+            echo "::error::Expected v$version or v$version-$name, got $RELEASE_TAG."
             exit 1
           fi
           git merge-base --is-ancestor HEAD origin/main

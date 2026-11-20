@@ -1,5 +1,5 @@
 {
-  "name": "dsh-vscode",
+  "name": "dsh-vscode-sivan",
   "displayName": "dsh-vscode",
   "description": "Run DeepSeek Harness in VS Code through ACP v1.",
   "icon": "media/marketplace-icon.png",

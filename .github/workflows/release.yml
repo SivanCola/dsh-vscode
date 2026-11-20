@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag, for example v0.0.2
+        description: Existing release tag, for example v0.0.2 or v0.0.1-dsh-vscode-sivan
         type: string
       verify-vscode:
         description: Check VS Code Marketplace authorization without publishing
